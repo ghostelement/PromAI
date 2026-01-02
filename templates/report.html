@@ -162,7 +162,25 @@
                 white-space: nowrap;
             }
         }
+        .back-btn {
+            background: #764ba2;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            float: right
+        }
 
+        .back-btn:hover {
+            background: rgba(141, 59, 154, 0.3);
+            transform: scale(1.1);
+        }
         /* 添加展开/收起按钮样式 */
         .section-header {
             display: flex;
@@ -351,6 +369,7 @@
     <div class="container">
         <!--<h1>集群系统监控巡检报告</h1>-->
         <h1 style="text-align: center">{{.Project}}</h1>
+        <a href="/api/promai/" class="back-btn">← 返回首页</a>
         <p>生成时间: {{.Timestamp.Format "2006-01-02 15:04:05"}}</p>
         <div class="datasource-info">
             <strong>数据源:</strong> {{.Datasource}}

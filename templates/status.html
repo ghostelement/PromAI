@@ -47,7 +47,27 @@
             font-size: 24px;
             margin-bottom: 16px;
         }
+         
 
+        .back-btn {
+            background: #764ba2;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            float: right
+        }
+
+        .back-btn:hover {
+            background: rgba(141, 59, 154, 0.3);
+            transform: scale(1.1);
+        }
         .summary-cards {
             display: flex;
             gap: 16px;
@@ -226,6 +246,7 @@
     <div class="container">
         <div class="header">
             <h1>服务健康看板</h1>
+            <a href="/api/promai/" class="back-btn">← 返回首页</a>
             <div class="datasource-info">
                 数据源: {{.Datasource}}
             </div>
