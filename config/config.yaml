@@ -60,8 +60,8 @@ metric_types:
         query: >-
           sum(pve_node_vm_count)
         threshold: 1
-        threshold_type: "greater"
-        threshold_status: "normal"
+        threshold_type: "less"
+        threshold_status: "critical"
         unit: ""
         
       - name: "PVE CPU使用率"
@@ -101,10 +101,10 @@ metric_types:
         query: >-
           avg_over_time(
             (
-              100 - avg by(instance, nodename) (irate(node_cpu_seconds_total{mode='idle'}[5m]) * 100)
+              100 - avg by(instance, nodename) (irate(node_cpu_seconds_total{job="linux_host",mode="idle"}[5m]) * 100)
             )[1h:]
-          ) * on(instance) group_left(nodename) node_uname_info
-        threshold: 99
+          ) * on(instance) group_left(nodename) node_uname_info{job="linux_host"}
+        threshold: 90
         threshold_type: "greater"
         unit: "%"
         labels:
@@ -112,7 +112,7 @@ metric_types:
           instance: "实例地址"
       - name: "机器负载与CPU核心数比率监控"
         query: >-
-          (node_load5/count without (cpu, mode) (node_cpu_seconds_total{mode="system"}))* on(instance) group_left(nodename) (node_uname_info{nodename !~"hadoop.*"})
+          (node_load5/count without (cpu, mode) (node_cpu_seconds_total{job="linux_host",mode="system"}))* on(instance) group_left(nodename) (node_uname_info{job="linux_host",nodename !~"hadoop.*"})
         threshold: 3
         threshold_type: "greater"
         unit: "倍"
@@ -121,7 +121,7 @@ metric_types:
           nodename: "主机名"
           
       - name: "内存性能状态监控"
-        query: "avg_over_time((100 - ((node_memory_MemAvailable_bytes * 100)/node_memory_MemTotal_bytes))[1h:]) * on(instance) group_left(nodename) node_uname_info"
+        query: "avg_over_time((100 - ((node_memory_MemAvailable_bytes{job='linux_host'} * 100)/node_memory_MemTotal_bytes{job='linux_host'}))[1h:]) * on(instance) group_left(nodename) node_uname_info{job='linux_host'}"
         threshold: 80
         threshold_type: "greater"
         unit: "%"
@@ -133,11 +133,11 @@ metric_types:
         query: >-
           (
             (
-              (100 - (node_filesystem_avail_bytes * 100 / node_filesystem_size_bytes{mountpoint=~"/home|/mnt.*|/data.*|/opt.*"}))
+              (100 - (node_filesystem_avail_bytes{job='linux_host'} * 100 / node_filesystem_size_bytes{job='linux_host',mountpoint=~"/home|/mnt.*|/data.*|/opt.*"}))
               and
-              ON (instance, device, mountpoint) node_filesystem_readonly == 0
+              ON (instance, device, mountpoint) node_filesystem_readonly{job='linux_host'} == 0
             )
-            * ON (instance) group_left(nodename) node_uname_info
+            * ON (instance) group_left(nodename) node_uname_info{job='linux_host'}
           )
         threshold: 80
         threshold_type: "greater"
@@ -151,7 +151,7 @@ metric_types:
 
       - name: "磁盘读写IO性能监控3小时内平均使用率"
         description: "磁盘读写IO性能监控-3小时内平均使用率"
-        query: 'min_over_time((rate(node_disk_io_time_seconds_total{}[5m]) * 100)[3h:5m]) >= 10'
+        query: 'min_over_time((rate(node_disk_io_time_seconds_total{job="linux_host"}[5m]) * 100)[3h:5m]) >= 10'
         threshold: 95
         threshold_type: "greater"
         unit: "%"
@@ -181,10 +181,10 @@ metric_types:
           instance: "实例地址"
           cpuIndex: "CPU序号"
       - name: "防火墙内存使用率"
-        query: sfSysMemoryUsage{job="firewall_af"}
-        threshold: 1
-        threshold_type: "equal"
-        threshold_status: "normal"
+        query: label_value(sfSysMemoryUsage, "sfSysMemoryUsage")
+        threshold: 80
+        threshold_type: "greater"
+        threshold_status: "critical"
         unit: ""
         labels:
           instance: "实例地址"
@@ -261,7 +261,7 @@ metric_types:
       # calico,ingress,etcd,dns
         description: "系统关键Pod运行状态监控"
         query: >-
-          kube_pod_status_ready{condition="false",namespace=~"kube-system|.*beiming.*|monitoring|default",pod !~".*backup.*"}
+          kube_pod_status_ready{condition="false",namespace=~"kube-system|.*beiming.*|monitoring|default",pod !~".*helm.*"}
         threshold: 0
         threshold_type: "equal"
         threshold_status: "normal"
@@ -445,7 +445,7 @@ metric_types:
           instance: "实例地址"
       - name: "S3 API接口响应错误数"
         description: "S3 API接口响应错误数"
-        query: 'sum by (server,api) (increase(minio_s3_requests_5xx_errors_total{job=~"minio-job"}[$__rate_interval]))'
+        query: 'sum by (server,api) (increase(minio_s3_requests_5xx_errors_total{job=~"minio-job"}[1h]))'
         threshold: 1
         threshold_type: "greater"
         threshold_status: "critical"
@@ -454,8 +454,38 @@ metric_types:
           server: "服务地址"
           api: "API接口"
 ##################
-# TODO: L5-nginx 服务监控
-
+  - type: "L5-Nginx代理服务"
+    metrics:
+      - name: "Nginx状态"
+        description: "Nginx状态"
+        query: 'nginx_up'
+        threshold: 1
+        threshold_type: "less"
+        threshold_status: "critical"
+        unit: ""
+        labels:
+          instance: "实例名称"
+          region: "监控区域"
+      - name: "Nginx最大连接数"
+        description: "Nginx最大连接数"
+        query: 'max_over_time(nginx_connections_active[12h])'
+        threshold: 1000
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: ""
+        labels:
+          instance: "实例名称"
+          region: "监控区域"
+      - name: "Nginx请求QPS"
+        description: "Nginx请求QPS"
+        query: 'irate(nginx_http_requests_total[2m])'
+        threshold: 500
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: ""
+        labels:
+          instance: "实例名称"
+          region: "监控区域"
 ################
   #- type: "L6-应用层：业务服务监控"
   #  metrics:

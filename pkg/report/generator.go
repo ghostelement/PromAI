@@ -1,6 +1,7 @@
 package report
 
 import (
+	"PromAI/pkg/database"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -8,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -49,6 +51,7 @@ type ReportData struct {
 	ChartData    map[string]template.JS
 	Project      string
 	Datasource   string
+	ReportUrl    string
 }
 
 func GetStatusText(status string) string {
@@ -62,7 +65,20 @@ func GetStatusText(status string) string {
 	}
 }
 
-func GenerateReport(data ReportData) (string, error) {
+// 生成巡检报告
+func GenerateReport(data ReportData, dbClient *database.DBclient) (string, error) {
+	ReportInfo := database.ReportHistory{
+		Project:       data.Project,
+		Datasource:    data.Datasource,
+		CreateTime:    data.Timestamp,
+		MaxValue:      0,
+		MinValue:      0,
+		Average:       0,
+		AlertCount:    0,
+		TotalCount:    0,
+		CriticalCount: 0,
+		WarningCount:  0,
+	}
 	// 计算每个组的统计信息
 	for _, group := range data.MetricGroups {
 		stats := GroupStats{
@@ -110,6 +126,13 @@ func GenerateReport(data ReportData) (string, error) {
 		// 	stats.Average = stats.Average / float64(stats.TotalCount)
 		// }
 		group.Stats = stats
+		ReportInfo.MaxValue += stats.MaxValue
+		ReportInfo.MinValue += stats.MinValue
+		ReportInfo.Average += stats.Average
+		ReportInfo.TotalCount += stats.TotalCount
+		ReportInfo.WarningCount += stats.WarningCount
+		ReportInfo.CriticalCount += stats.CriticalCount
+		ReportInfo.AlertCount += stats.AlertCount
 	}
 
 	// 处理图表数据
@@ -190,7 +213,8 @@ func GenerateReport(data ReportData) (string, error) {
 	}
 
 	// 创建输出文件
-	filename := fmt.Sprintf("reports/inspection_report_%s.html", time.Now().Format("20060102_150405"))
+	createTime := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("reports/inspection_report_%s.html", createTime)
 	file, err := os.Create(filename)
 	if err != nil {
 		return "", fmt.Errorf("creating output file: %w", err)
@@ -201,9 +225,28 @@ func GenerateReport(data ReportData) (string, error) {
 	if err := tmpl.Execute(file, data); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
+	// 同步到磁盘
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return "", fmt.Errorf("syncing file to disk: %w", err)
+	}
 
 	// log.Println("Report generated successfully:", filename)
 	log.Printf("项目[%s]报告生成成功: %s", data.Project, filename)
 
+	ReportInfo.ReportUrl = strings.TrimPrefix(filename, "reports/")
+	ReportInfo.CreateTime = time.Now()
+
+	if dbClient != nil {
+		log.Printf("报告写入数据库中...")
+		err := dbClient.SaveReportHistory(&ReportInfo)
+		if err != nil {
+			log.Printf("报告写入数据库失败: %v", err)
+		} else {
+			log.Printf("报告写入数据库成功")
+		}
+	} else {
+		log.Printf("报告写入数据库失败: 数据库未初始化")
+	}
 	return filename, nil // 添加返回语句
 }

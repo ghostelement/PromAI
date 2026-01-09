@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"PromAI/pkg/config"
+	"PromAI/pkg/database"
 	"PromAI/pkg/metrics"
 	"PromAI/pkg/notify"
 	"PromAI/pkg/prometheus"
@@ -27,6 +28,8 @@ import (
 	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v2"
 )
+
+var dbClient *database.DBclient
 
 // loadConfig 加载配置文件
 func loadConfig(path string) (*config.Config, error) {
@@ -71,11 +74,25 @@ func main() {
 	port := flag.String("port", ":8091", "服务端口")
 	flag.Parse()
 
+	// 检查reports、data目录,没有的话创建
+	if err := os.MkdirAll("reports", 0755); err != nil {
+		log.Printf("创建目录失败: %v", err)
+	}
+	if err := os.MkdirAll("data", 0755); err != nil {
+		log.Printf("创建目录失败: %v", err)
+	}
+
 	// 初始化应用程序
 	client, config, err := setup(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to setup application: %v", err)
 	}
+	// 创建数据库连接
+	dbClient, err = database.NewDBClient()
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer dbClient.CloseDB()
 
 	// 创建指标收集器
 	collector := metrics.NewCollector(client.API, config)
@@ -97,7 +114,7 @@ func main() {
 				return
 			}
 
-			reportFilePath, err := report.GenerateReport(*data)
+			reportFilePath, err := report.GenerateReport(*data, dbClient)
 			if err != nil {
 				log.Printf("Error generating report: %v", err)
 				return
@@ -256,12 +273,12 @@ func executeInspectionWithProgress(collector *metrics.Collector, config *config.
 	taskmanager.GlobalTaskManager.UpdateTaskProgress(taskID, 90, "生成巡检报告")
 
 	// 生成报告
-	reportFilePath, err := report.GenerateReport(*data)
+	reportFilePath, err := report.GenerateReport(*data, dbClient)
 	if err != nil {
 		taskmanager.GlobalTaskManager.FailStep(taskID, "生成巡检报告", err.Error())
 		return nil, fmt.Errorf("generating report: %w", err)
 	}
-
+	data.ReportUrl = reportFilePath
 	// 完成任务
 	taskmanager.GlobalTaskManager.CompleteTask(taskID, reportFilePath)
 
@@ -386,19 +403,19 @@ func makeReportHandler(collector *metrics.Collector, config *config.Config) http
 			return
 		}
 
-		reportFilePath, err := report.GenerateReport(*data)
-		if err != nil {
-			http.Error(w, "Failed to generate report", http.StatusInternalServerError)
-			log.Printf("Error generating report: %v", err)
-			return
-		}
+		//reportFilePath, err := report.GenerateReport(*data, dbClient)
+		//if err != nil {
+		//	http.Error(w, "Failed to generate report", http.StatusInternalServerError)
+		//	log.Printf("Error generating report: %v", err)
+		//	return
+		//}
 
 		// 创建包含HTTP请求和报告数据的context，用于动态URL生成和分类汇总
 		ctx := context.WithValue(r.Context(), "http_request", r)
 		ctx = context.WithValue(ctx, "report_data", *data)
 
 		// 手动触发时也发送通知
-		sendNotificationsWithContext(ctx, config, reportFilePath, data)
+		sendNotificationsWithContext(ctx, config, data.ReportUrl, data)
 
 		// 如果是自动生成的taskid，可以可选地清理任务记录（可选）
 		if strings.HasPrefix(taskID, "manual_") {
@@ -407,7 +424,7 @@ func makeReportHandler(collector *metrics.Collector, config *config.Config) http
 		}
 
 		// 去掉 reports/ 前缀，因为静态文件服务已经映射到 reports 目录
-		reportFileName := strings.TrimPrefix(reportFilePath, "reports/")
+		reportFileName := strings.TrimPrefix(data.ReportUrl, "reports/")
 		http.Redirect(w, r, "/api/promai/reports/"+reportFileName, http.StatusSeeOther)
 	}
 }
@@ -601,17 +618,17 @@ func reportsListHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
 	// 读取reports目录下的所有HTML文件
-	files, err := os.ReadDir("reports")
-	if err != nil {
-		log.Printf("Error reading reports directory: %v", err)
-		http.Error(w, "Failed to read reports directory", http.StatusInternalServerError)
-		return
-	}
+	//files, err := os.ReadDir("reports")
+	//if err != nil {
+	//	log.Printf("Error reading reports directory: %v", err)
+	//	http.Error(w, "Failed to read reports directory", http.StatusInternalServerError)
+	//	return
+	//}
 
-	log.Printf("Found %d files in reports directory", len(files))
+	//log.Printf("Found %d files in reports directory", len(files))
 
 	type ReportInfo struct {
-		ID         string `json:"id"`
+		ID         uint   `json:"id"`
 		Title      string `json:"title"`
 		Time       string `json:"time"`
 		Size       string `json:"size"`
@@ -630,120 +647,34 @@ func reportsListHandler(w http.ResponseWriter, r *http.Request) {
 	var reports []ReportInfo
 	htmlFileCount := 0
 
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".html") {
-			htmlFileCount++
-			info, err := file.Info()
-			if err != nil {
-				continue
-			}
-
-			// 解析文件名获取时间信息
-			// 例如: inspection_report_20250926_103846.html
-			name := file.Name()
-			id := strings.TrimSuffix(name, ".html")
-
-			// 从文件名中提取时间
-			parts := strings.Split(name, "_")
-			if len(parts) >= 4 {
-				dateStr := parts[2]
-				timeStr := strings.TrimSuffix(parts[3], ".html")
-				if len(dateStr) == 8 && len(timeStr) == 6 {
-					formattedTime := fmt.Sprintf("%s-%s-%s %s:%s:%s",
-						dateStr[:4], dateStr[4:6], dateStr[6:8],
-						timeStr[:2], timeStr[2:4], timeStr[4:6])
-
-					// 尝试从报告文件中提取数据源信息
-					datasource := "默认数据源"
-
-					// 读取报告文件的前几行来查找数据源信息
-					if content, err := os.ReadFile("reports/" + name); err == nil {
-						// 在HTML内容中搜索数据源信息 - 查找URL格式
-						contentStr := string(content)
-
-						// 方法1: 使用正则表达式提取数据源
-						re := regexp.MustCompile(`<strong>数据源:</strong>\s*(https?://[^\s<]+)`)
-						if matches := re.FindStringSubmatch(contentStr); len(matches) > 1 {
-							urlStr := matches[1]
-							// 从URL中提取有意义的名称
-							if strings.Contains(urlStr, "prometheus") && strings.HasPrefix(urlStr, "http") {
-								// 解析URL
-								if u, err := url.Parse(urlStr); err == nil {
-									// 提取主机名（不带端口）
-									host := u.Hostname()
-									// 对于prometheus URL，提取prometheus后面的完整域名
-									if strings.Contains(host, "prometheus.") {
-										parts := strings.Split(host, "prometheus.")
-										if len(parts) > 1 {
-											datasource = parts[1]
-										}
-									} else {
-										// 对于非prometheus URL，使用完整域名
-										datasource = host
-									}
-								} else {
-									// 如果解析失败，回退到使用完整URL
-									datasource = urlStr
-								}
-							} else {
-								// 从URL中提取主机名
-								if u, err := url.Parse(urlStr); err == nil {
-									hostParts := strings.Split(u.Hostname(), ".")
-									if len(hostParts) > 0 {
-										datasource = hostParts[0]
-									}
-								}
-							}
-						}
-					}
-
-					// 从任务管理器获取任务信息以计算耗时
-					task, exists := taskmanager.GlobalTaskManager.GetTask(id)
-					var startTime, endTime time.Time
-
-					if exists && task != nil {
-						startTime = task.StartTime
-						endTime = task.EndTime
-					} else {
-						// 如果任务不存在，使用文件修改时间作为结束时间
-						endTime = info.ModTime()
-						// 尝试从文件名中提取开始时间（如果文件名包含时间戳）
-						if fileTime, err := time.Parse("20060102_150405", strings.Split(name, "_")[0]); err == nil {
-							startTime = fileTime
-						}
-					}
-
-					report := ReportInfo{
-						ID:    id,
-						Title: fmt.Sprintf("系统巡检报告 - %s", datasource),
-						Time:  formattedTime,
-						Size:  formatFileSize(info.Size()),
-						URL:   "/api/promai/reports/" + name,
-					}
-
-					// 计算实际耗时
-					if !startTime.IsZero() && !endTime.IsZero() {
-						duration := endTime.Sub(startTime)
-						if duration < time.Minute {
-							report.Duration = fmt.Sprintf("%d秒", int(duration.Seconds()))
-						} else if duration < time.Hour {
-							report.Duration = fmt.Sprintf("%.1f分钟", duration.Minutes())
-						} else {
-							report.Duration = fmt.Sprintf("%.1f小时", duration.Hours())
-						}
-					} else {
-						report.Duration = "2分钟"
-					}
-					report.Stats.Total = 150
-					report.Stats.Alerts = 0
-					report.Stats.Critical = 0
-					report.Stats.Warning = 0
-					report.Status = "success"
-					report.Datasource = datasource
-					reports = append(reports, report)
+	if dbClient != nil {
+		log.Printf("获取数据库报告列表...")
+		lists, err := dbClient.GetReportHistory(20, 0)
+		if err != nil {
+			log.Printf("获取报告列表失败: %v", err)
+		} else {
+			log.Printf("获取报告列表成功")
+			for _, list := range lists {
+				createTime := list.CreateTime.Format("2006-01-02 15:04:05")
+				//reportUrl := strings.TrimPrefix(list.ReportUrl, "reports/")
+				report := ReportInfo{
+					ID:    list.ID,
+					Title: fmt.Sprintf("系统巡检报告 - %s", list.ReportUrl),
+					Time:  createTime,
+					URL:   list.ReportUrl,
 				}
+
+				report.Stats.Total = list.TotalCount
+				report.Stats.Alerts = list.AlertCount
+				report.Stats.Critical = list.CriticalCount
+				report.Stats.Warning = list.WarningCount
+				report.Status = "success"
+				report.Datasource = list.Datasource
+				reports = append(reports, report)
 			}
 		}
+	} else {
+		log.Printf("获取数据库报告列表失败: 数据库未初始化")
 	}
 
 	log.Printf("Processed %d HTML files, created %d report entries", htmlFileCount, len(reports))
