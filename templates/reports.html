@@ -584,13 +584,29 @@
         function deleteReport(reportId) {
             if (confirm('确定要删除这个报告吗？')) {
                 // 从数组中移除
-                reports = reports.filter(r => r.id !== reportId);
+                //reports = reports.filter(r => r.id !== reportId);
+                fetch('/api/promai/reports/delete', {
+                    method: 'POST',
+                    headers: {
+                    'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        id: reportId, }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Report deleted:', data);
+                    fetchReportsFromBackend();
+                })
+                .catch(error => {
+                    console.error('Failed to delete report:', error);
+                    fetchReportsFromBackend();
+                });
 
                 // 重新加载
-                loadReports();
+                //fetchReportsFromBackend();
+                //loadReports();
 
-                // TODO: 调用后端API删除文件
-                console.log('Deleting report:', reportId);
             }
         }
 

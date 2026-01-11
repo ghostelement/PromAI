@@ -10,6 +10,9 @@ type ReportHistory struct {
 	Project       string    `json:"project" gorm:"column:project_name;comment:项目名称" binding:"required"`
 	Datasource    string    `json:"datasource" gorm:"column:datasource;comment:数据源" binding:"required"`
 	ReportUrl     string    `json:"report_url" gorm:"column:report_url;comment:报告地址"`
+	TaskId        string    `json:"task_id" gorm:"column:task_id;comment:任务ID"`
+	FileSize      int64     `json:"file_size" gorm:"column:file_size;comment:文件大小"`
+	TaskTime      int64     `json:"task_time" gorm:"column:task_time;comment:任务耗时"`
 	MaxValue      float64   `json:"max_value" gorm:"column:max_value;comment:最大值"`
 	MinValue      float64   `json:"min_value" gorm:"column:min_value;comment:最小值"`
 	Average       float64   `json:"average" gorm:"column:average;comment:平均值"`

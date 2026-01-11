@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,7 +144,7 @@ func main() {
 		if cleanupSchedule != "" {
 			c := cron.New()
 			_, err := c.AddFunc(cleanupSchedule, func() {
-				if err := report.CleanupReports(config.ReportCleanup.MaxAge); err != nil {
+				if err := report.CleanupReports(dbClient, config.ReportCleanup.MaxAge); err != nil {
 					log.Printf("报告清理失败: %v", err)
 					return
 				}
@@ -226,6 +227,8 @@ func setupRoutes(collector *metrics.Collector, config *config.Config) {
 
 	// 设置报告列表API
 	http.HandleFunc("/api/promai/reports/list", reportsListHandler)
+	// 设置删除报告API
+	http.HandleFunc("/api/promai/reports/delete", deleteReportHandler)
 
 	// 设置最近活动API
 	http.HandleFunc("/api/promai/activities", recentActivitiesHandler)
@@ -264,6 +267,7 @@ func executeInspectionWithProgress(collector *metrics.Collector, config *config.
 
 	// 设置数据源信息
 	data.Datasource = prometheusURL
+	data.TaskId = taskID
 
 	taskmanager.GlobalTaskManager.CompleteStep(taskID, "收集服务状态")
 	taskmanager.GlobalTaskManager.UpdateTaskProgress(taskID, 75, "分析告警信息")
@@ -656,6 +660,7 @@ func reportsListHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("获取报告列表失败: %v", err)
 		} else {
 			log.Printf("获取报告列表成功")
+			htmlFileCount = len(lists)
 			for _, list := range lists {
 				createTime := list.CreateTime.Format("2006-01-02 15:04:05")
 				//reportUrl := strings.TrimPrefix(list.ReportUrl, "reports/")
@@ -666,6 +671,8 @@ func reportsListHandler(w http.ResponseWriter, r *http.Request) {
 					URL:   list.ReportUrl,
 				}
 
+				report.Size = formatFileSize(list.FileSize)
+				report.Duration = fmt.Sprintf("%d 毫秒", list.TaskTime)
 				report.Stats.Total = list.TotalCount
 				report.Stats.Alerts = list.AlertCount
 				report.Stats.Critical = list.CriticalCount
@@ -912,4 +919,51 @@ func taskDetailHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// 按照id删除报告 API
+func deleteReportHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[API] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+	reportsDir := "reports"
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req = struct {
+		ID string `json:"id"`
+	}{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "ID required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("删除报告ID: %s", req.ID)
+	idInt, err := strconv.ParseUint(req.ID, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+	id := uint(idInt)
+	if dbClient == nil {
+		http.Error(w, "Database client not initialized", http.StatusInternalServerError)
+		return
+	}
+	list, err := dbClient.GetReportHistoryById(id)
+	if err != nil {
+		http.Error(w, "Failed to get report", http.StatusInternalServerError)
+		log.Printf("%s", err)
+		return
+	}
+	if err := dbClient.DeleteReportHistory(id); err != nil {
+		http.Error(w, "Failed to delete report", http.StatusInternalServerError)
+		log.Printf("%s", err)
+		return
+	}
+
+	os.Remove(reportsDir + "/" + list.ReportUrl)
+	w.WriteHeader(http.StatusOK)
 }

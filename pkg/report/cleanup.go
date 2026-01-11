@@ -1,37 +1,29 @@
 package report
 
 import (
-    "log"
-    "os"
-    "path/filepath"
-    "time"
+	"PromAI/pkg/database"
+	"os"
+	"time"
 )
 
 // CleanupReports 清理旧报告
-func CleanupReports(maxAge int) error {
-    reportsDir := "reports"
-    now := time.Now()
+func CleanupReports(dbClient *database.DBclient, maxAge int) error {
+	reportsDir := "reports"
+	now := time.Now()
 
-    // 遍历报告目录
-    return filepath.Walk(reportsDir, func(path string, info os.FileInfo, err error) error {
-        if err != nil {
-            return err
-        }
-
-        // 跳过目录本身
-        if path == reportsDir {
-            return nil
-        }
-
-        // 检查文件年龄
-        if info.ModTime().Add(time.Duration(maxAge) * 24 * time.Hour).Before(now) {
-            if err := os.Remove(path); err != nil {
-                log.Printf("删除报告文件失败 %s: %v", path, err)
-                return err
-            }
-            log.Printf("已删除过期报告: %s", path)
-        }
-
-        return nil
-    })
+	// 计算清理报告的时间线
+	cleanTime := now.Add(-time.Duration(maxAge) * 24 * time.Hour)
+	// 查询报告
+	lists, err := dbClient.GetReportHistoryByTime(cleanTime)
+	if err != nil {
+		return err
+	}
+	for _, list := range lists {
+		// 删除报告
+		if err := dbClient.DeleteReportHistory(list.ID); err != nil {
+			return err
+		}
+		os.Remove(reportsDir + "/" + list.ReportUrl)
+	}
+	return nil
 }

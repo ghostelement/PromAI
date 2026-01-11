@@ -52,6 +52,7 @@ type ReportData struct {
 	Project      string
 	Datasource   string
 	ReportUrl    string
+	TaskId       string
 }
 
 func GetStatusText(status string) string {
@@ -71,6 +72,10 @@ func GenerateReport(data ReportData, dbClient *database.DBclient) (string, error
 		Project:       data.Project,
 		Datasource:    data.Datasource,
 		CreateTime:    data.Timestamp,
+		ReportUrl:     "",
+		TaskId:        "",
+		TaskTime:      0,
+		FileSize:      0,
 		MaxValue:      0,
 		MinValue:      0,
 		Average:       0,
@@ -230,6 +235,17 @@ func GenerateReport(data ReportData, dbClient *database.DBclient) (string, error
 		file.Close()
 		return "", fmt.Errorf("syncing file to disk: %w", err)
 	}
+
+	// 计算报告大小
+	fileInfo, err := os.Stat(filename)
+	if err != nil {
+		file.Close()
+		return "", fmt.Errorf("getting file info: %w", err)
+	}
+	ReportInfo.FileSize = fileInfo.Size()
+	// 计算任务耗时
+	ReportInfo.TaskTime = int64(time.Since(data.Timestamp)) / int64(time.Millisecond)
+	ReportInfo.TaskId = data.TaskId
 
 	// log.Println("Report generated successfully:", filename)
 	log.Printf("项目[%s]报告生成成功: %s", data.Project, filename)
