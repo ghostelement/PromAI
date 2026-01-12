@@ -2,7 +2,7 @@ FROM docker.io/library/golang:1.23.4-alpine3.20 AS builder
 
 WORKDIR /build
 COPY . .
-RUN go env -w GO111MODULE=on &&  go mod download && go build && ls -la /build
+RUN go env -w GOPROXY=https://goproxy.cn,direct && go env -w GO111MODULE=on &&  go mod download && go build && ls -la /build
 
 FROM docker.io/alpine:3.21.0
 # 添加标识信息
@@ -11,7 +11,7 @@ LABEL version="1.0" \
       maintainer="Kubehan"
 WORKDIR /app
 ENV TZ=Asia/Shanghai
-RUN apk update && apk add --no-cache tzdata && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+RUN sed -i "s|https://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g" /etc/apk/repositories && apk update && apk add --no-cache tzdata && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 COPY --from=builder /build/PromAI /app/
 COPY --from=builder /build/config /app/config/
 COPY --from=builder /build/outputs /app/outputs/
