@@ -373,7 +373,96 @@ metric_types:
         labels:
           node: "主机名"
 
-
+### 数据库 ###
+  - type: "L3-数据库层：TiDB数据库服务"
+    metrics:
+      - name: "TiDB数据库状态"
+        description: "TiDB数据库状态"
+        query: 'probe_success{group="tidb"}'
+        threshold: 1
+        threshold_type: "equal"
+        threshold_status: "normal"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "TiKV服务状态"
+        description: "TiKV服务状态"
+        query: 'probe_success{group="tikv"}'
+        threshold: 1
+        threshold_type: "equal"
+        threshold_status: "normal"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "PD服务状态"
+        description: "PD服务状态"
+        query: 'probe_success{group="pd"}'
+        threshold: 1
+        threshold_type: "equal"
+        threshold_status: "normal"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "TiKV日志备份服务状态"
+        description: "TiKV日志备份服务状态"
+        query: 'tikv_log_backup_enabled'
+        threshold: 1
+        threshold_type: "equal"
+        threshold_status: "normal"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "TiKV日志备份服务任务执行状态"
+        description: "TiKV日志备份服务任务执行状态"
+        query: 'tikv_log_backup_task_status'
+        threshold: 0
+        threshold_type: "equal"
+        threshold_status: "normal"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "TiDB活跃连接数"
+        description: "TiDB活跃连接数"
+        query: 'tidb_server_tokens'
+        threshold: 500
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: ""
+        labels:
+          instance: "实例地址"
+          cluster: "集群名称"
+      - name: "TiDB SQL并发度"
+        description: "TiDB SQL并发度"
+        query: 'sum(rate(tidb_server_handle_query_duration_seconds_sum{sql_type!="internal"}[5m])) by (sql_type)'
+        threshold: 2000
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: "ms"
+        labels:
+          sql_type: "SQL类型"
+      - name: "TiDB QPS"
+        description: "TiDB QPS"
+        query: 'sum(rate(tidb_executor_statement_total[5m])) by (type)'
+        threshold: 500
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: "qps"
+        labels:
+          type: "SQL类型"
+      - name: "TiDB SQL查询失败"
+        description: "TiDB SQL查询失败"
+        query: 'sum(rate(tidb_server_execute_error_total[5m]))'
+        threshold: 10
+        threshold_type: "greater"
+        threshold_status: "critical"
+        unit: ""
+        labels:
+          type: "错误类型"
 ### 中间件 #######
 
   - type: "L4-中间件层：Redis缓存服务"
@@ -409,7 +498,7 @@ metric_types:
       - name: "Redis内存碎片"
         description: "Redis内存碎片率监控"
         query: "redis_memory_used_rss_bytes/redis_memory_used_bytes"
-        threshold: 2.5
+        threshold: 3
         threshold_type: "greater"
         unit: ""
         labels:
@@ -460,8 +549,8 @@ metric_types:
         description: "Nginx状态"
         query: 'nginx_up'
         threshold: 1
-        threshold_type: "less"
-        threshold_status: "critical"
+        threshold_type: "equal"
+        threshold_status: "normal"
         unit: ""
         labels:
           instance: "实例名称"
